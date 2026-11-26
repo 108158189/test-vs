@@ -1,0 +1,43 @@
+# This is a workflow-only repository. Never commit source code, secrets,
+# build outputs or local configuration here.
+
+# source trees and build output
+/src/
+/build/
+/build-port/
+/buildenv/
+/dist/
+/out/
+/output/
+*.tar
+*.tar.gz
+*.enc
+*.dmg
+*.app
+*.pkg
+*.zip
+*.7z
+*.o
+*.obj
+*.lib
+*.pdb
+*.exe
+*.dll
+*.log
+
+# credentials and local config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+license.dat
+vsdj_server.conf
+mixxx.cfg
+soundconfig.xml
+
+# OS noise
+.DS_Store
+Thumbs.db
