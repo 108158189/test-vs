@@ -1,41 +1,37 @@
-name: relay-artifacts-to-r2
+name: probe-macos-intel-runner
 
-# One-shot relay for VSDJ Pro M9 macOS CI. Restored to the original
-# environment probe after the artifacts have been retrieved locally.
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  relay:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  probe:
+    runs-on: macos-15-intel
+    timeout-minutes: 10
     steps:
-      - name: Download encrypted artifacts from build run
-        uses: actions/download-artifact@v4
-        with:
-          run-id: 45893609242
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: dl
-
-      - name: Inspect downloaded files
-        run: find dl -maxdepth 3 -type f -print -exec ls -l {} \;
-
-      - name: Push encrypted packages to private R2
-        env:
-          PUT_X86: 'https://8943133e9a60021453d8b85ccaac091d.r2.cloudflarestorage.com/vsdj-ci-drop/ci-out/20261127-x86_64-dmgs.tar.enc?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=5804093376c16567cd8f5b2484ae5bd3%2F20261126%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261126T213709Z&X-Amz-Expires=7200&X-Amz-SignedHeaders=host&X-Amz-Signature=7ce204263b20dd3e87b660b667cf91e839d811679f2aeb8735a19d63ff5eb89b'
-          PUT_ARM: 'https://8943133e9a60021453d8b85ccaac091d.r2.cloudflarestorage.com/vsdj-ci-drop/ci-out/20261127-arm64-dmgs.tar.enc?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=5804093376c16567cd8f5b2484ae5bd3%2F20261126%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261126T213709Z&X-Amz-Expires=7200&X-Amz-SignedHeaders=host&X-Amz-Signature=d4fe32664a4d9450bee015631ec2456037807731871c803103079e38bbda4e5d'
+      - name: Runner identity
         run: |
-          set -euo pipefail
-          test -f dl/macos-x86_64-unsigned/dmgs.tar.enc
-          test -f dl/macos-arm64-unsigned/dmgs.tar.enc
-          curl -sS -f -X PUT --data-binary @dl/macos-x86_64-unsigned/dmgs.tar.enc \
-            "$PUT_X86" -w "x86 PUT http=%{http_code}\n"
-          curl -sS -f -X PUT --data-binary @dl/macos-arm64-unsigned/dmgs.tar.enc \
-            "$PUT_ARM" -w "arm PUT http=%{http_code}\n"
-
-      - name: Fingerprint
-        run: sha256sum dl/*/dmgs.tar.enc
+          echo "=== OS / image ==="
+          sw_vers
+          uname -m
+          sysctl -n hw.model || true
+          echo "=== Xcode / SDK ==="
+          xcodebuild -version || true
+          xcode-select -p || true
+          xcrun --sdk macosx --show-sdk-path || true
+          echo "=== toolchain ==="
+          cmake --version || true
+          ninja --version || true
+          clang --version || true
+          python3 --version || true
+          brew --version || true
+          echo "=== disk ==="
+          df -h .
+          echo "=== cross-arch clang probe ==="
+          printf 'int main(void){return 0;}\n' > /tmp/vsdj_probe.c
+          clang -arch x86_64 /tmp/vsdj_probe.c -o /tmp/vsdj_probe_x64 && file /tmp/vsdj_probe_x64
+          clang -arch arm64 /tmp/vsdj_probe.c -o /tmp/vsdj_probe_arm && file /tmp/vsdj_probe_arm
+          rm -f /tmp/vsdj_probe.c /tmp/vsdj_probe_x64 /tmp/vsdj_probe_arm
+          echo "=== readonly probe: no checkout, no artifacts, no uploads ==="
