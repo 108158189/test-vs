@@ -1,0 +1,107 @@
+name: build-macos-dmg
+
+# Template only. Not yet executed on a hosted macOS runner.
+# Run probe.yml first, then adjust toolchain versions as needed.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            triplet: x64-osx-min1100-release
+            qml: OFF
+            buildenv: macos_release_buildenv.sh
+          - arch: arm64
+            triplet: arm64-osx-min1100-release
+            qml: ON
+            buildenv: macos_arm64-cross-release_buildenv.sh
+    env:
+      BUNDLE_URL: ${{ secrets.SOURCE_BUNDLE_URL }}
+      BUNDLE_KEY: ${{ secrets.SOURCE_BUNDLE_KEY }}
+      ARTIFACT_KEY: ${{ secrets.ARTIFACT_ENC_KEY }}
+    steps:
+      - name: Checkout workflow shell only
+        uses: actions/checkout@v4
+
+      - name: Fetch and decrypt source bundle
+        run: bash scripts/fetch_source.sh
+
+      - name: Set up build environment
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          chmod +x tools/*.sh
+          bash "tools/${{ matrix.buildenv }}" setup
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cd "$SRC"
+          mkdir -p build
+          cd build
+          cmake \
+            -DBULK=ON -DCOREAUDIO=ON -DHSS1394=ON -DMACOS_BUNDLE=ON \
+            -DMODPLUG=ON -DQT6=ON -DQML=${{ matrix.qml }} -DWAVPACK=ON \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DWARNINGS_FATAL=ON -DDEBUG_ASSERTIONS_FATAL=OFF \
+            -DBATTERY=ON -DBROADCAST=ON -DDOWNLOAD_MANUAL=ON -DHID=ON \
+            -DKEYFINDER=ON -DLILV=ON -DOPUS=ON -DQTKEYCHAIN=ON \
+            -DVINYLCONTROL=ON -DCMAKE_VERBOSE_MAKEFILE=OFF \
+            -L ..
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cd "$SRC/build"
+          cmake --build . --config RelWithDebInfo
+
+      - name: Package unsigned dmg
+        run: |
+          set -euo pipefail
+          cd "$SRC/build"
+          ok=0
+          for i in 1 2 3 4 5 6; do
+            if cpack -G DragNDrop -V; then ok=1; break; fi
+            echo "cpack attempt $i failed, retrying"
+            sleep 2
+          done
+          if [ "$ok" -ne 1 ]; then echo "cpack failed after retries" >&2; exit 1; fi
+          ls -la ./*.dmg
+
+      - name: Encrypt build outputs
+        run: |
+          set -euo pipefail
+          : "${ARTIFACT_KEY:?ARTIFACT_ENC_KEY secret is missing}"
+          mkdir -p "$RUNNER_TEMP/dmgout"
+          cp "$SRC"/build/*.dmg "$RUNNER_TEMP/dmgout/"
+          (cd "$RUNNER_TEMP/dmgout" && tar -cf "$RUNNER_TEMP/dmgs.tar" .)
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+            -pass env:ARTIFACT_KEY \
+            -in "$RUNNER_TEMP/dmgs.tar" \
+            -out "$RUNNER_TEMP/dmgs.tar.enc"
+          shasum -a 256 "$RUNNER_TEMP/dmgs.tar.enc"
+          rm -rf "$RUNNER_TEMP/dmgout" "$RUNNER_TEMP/dmgs.tar"
+
+      - name: Upload encrypted artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-unsigned
+          path: ${{ runner.temp }}/dmgs.tar.enc
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Clean up ephemeral source
+        if: always()
+        run: |
+          rm -rf "${SRC:-}" "$RUNNER_TEMP/bundle.tar" "$RUNNER_TEMP/bundle.tar.enc" || true
