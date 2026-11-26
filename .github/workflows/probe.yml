@@ -1,0 +1,37 @@
+name: probe-macos-intel-runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - name: Runner identity
+        run: |
+          echo "=== OS / image ==="
+          sw_vers
+          uname -m
+          sysctl -n hw.model || true
+          echo "=== Xcode / SDK ==="
+          xcodebuild -version || true
+          xcode-select -p || true
+          xcrun --sdk macosx --show-sdk-path || true
+          echo "=== toolchain ==="
+          cmake --version || true
+          ninja --version || true
+          clang --version || true
+          python3 --version || true
+          brew --version || true
+          echo "=== disk ==="
+          df -h .
+          echo "=== cross-arch clang probe ==="
+          printf 'int main(void){return 0;}\n' > /tmp/vsdj_probe.c
+          clang -arch x86_64 /tmp/vsdj_probe.c -o /tmp/vsdj_probe_x64 && file /tmp/vsdj_probe_x64
+          clang -arch arm64 /tmp/vsdj_probe.c -o /tmp/vsdj_probe_arm && file /tmp/vsdj_probe_arm
+          rm -f /tmp/vsdj_probe.c /tmp/vsdj_probe_x64 /tmp/vsdj_probe_arm
+          echo "=== readonly probe: no checkout, no artifacts, no uploads ==="
